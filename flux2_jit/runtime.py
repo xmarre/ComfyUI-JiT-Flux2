@@ -28,6 +28,10 @@ class JiTRuntime:
     token_dim: Optional[int] = None
     patch_size: Optional[int] = None
     coord_cache: CoordCache = field(default_factory=CoordCache)
+    pending_target_stage: Optional[int] = None
+    pending_newly_activated: Optional[torch.Tensor] = None
+    pending_target_tokens: Optional[torch.Tensor] = None
+    pending_relax_remaining: int = 0
 
     def initialize(self, diffusion_model, x: torch.Tensor) -> None:
         if self.current_stage is not None:
@@ -86,20 +90,59 @@ class JiTRuntime:
         selected = candidate_indices[topk]
         return torch.cat([current_indices, selected]).sort().values.long()
 
-    def _microflow_bridge(self, current_tokens: torch.Tensor, new_indices: torch.Tensor, target_tokens: torch.Tensor) -> torch.Tensor:
+    def _microflow_bridge(
+        self,
+        current_tokens: torch.Tensor,
+        new_indices: torch.Tensor,
+        target_tokens: torch.Tensor,
+        steps_remaining: int,
+    ) -> torch.Tensor:
         if new_indices.numel() == 0:
             return current_tokens
-        steps = self.config.microflow_relax_steps
-        if steps <= 0:
+        if steps_remaining <= 0:
             current_tokens[:, new_indices, :] = target_tokens
             return current_tokens
         current = current_tokens[:, new_indices, :].clone()
-        weight = 1.0 / float(steps)
+        weight = 1.0 / float(steps_remaining)
         current_tokens[:, new_indices, :] = (1.0 - weight) * current + weight * target_tokens
         return current_tokens
 
+    def _clear_pending_microflow(self) -> None:
+        self.pending_target_stage = None
+        self.pending_newly_activated = None
+        self.pending_target_tokens = None
+        self.pending_relax_remaining = 0
+
+    def _apply_pending_microflow(self, diffusion_model, x: torch.Tensor) -> torch.Tensor:
+        if self.pending_relax_remaining <= 0:
+            return x
+        assert self.pending_newly_activated is not None
+        assert self.pending_target_tokens is not None
+
+        current_tokens, _ = diffusion_model.process_img(x)
+        current_tokens = self._microflow_bridge(
+            current_tokens,
+            self.pending_newly_activated,
+            self.pending_target_tokens,
+            self.pending_relax_remaining,
+        )
+        x = unpack_tokens_to_image(current_tokens, self.patch_size, self.grid_h, self.grid_w, x.shape[2], x.shape[3])
+        self.pending_relax_remaining -= 1
+
+        if self.pending_relax_remaining == 0:
+            assert self.pending_target_stage is not None
+            self.current_stage = self.pending_target_stage
+            log_info(
+                self.config.verbose,
+                f"Completed microflow relaxation; stage committed to {self.current_stage}",
+            )
+            self._clear_pending_microflow()
+        return x
+
     def maybe_apply_stage_transition(self, diffusion_model, x: torch.Tensor, step_index: int, sigma: torch.Tensor) -> torch.Tensor:
         self.initialize(diffusion_model, x)
+        if self.pending_relax_remaining > 0:
+            return self._apply_pending_microflow(diffusion_model, x)
         assert self.current_stage is not None
         target_stage = self.target_stage_for_step(step_index)
         if target_stage >= self.current_stage:
@@ -149,9 +192,21 @@ class JiTRuntime:
         target_tokens = x0_interpolated[:, newly_activated, :] * (1.0 - sigma_scalar) + noise_tokens[:, newly_activated, :] * sigma_scalar
 
         current_tokens, _ = diffusion_model.process_img(x)
-        current_tokens = self._microflow_bridge(current_tokens, newly_activated, target_tokens)
-        x = unpack_tokens_to_image(current_tokens, self.patch_size, self.grid_h, self.grid_w, x.shape[2], x.shape[3])
+        steps = int(self.config.microflow_relax_steps)
         self.current_indices = new_indices
-        self.current_stage = target_stage
-        log_info(self.config.verbose, f"Activated {newly_activated.numel()} new tokens; now {self.current_indices.numel()}/{self.total_tokens}")
-        return x
+        if steps <= 0:
+            current_tokens = self._microflow_bridge(current_tokens, newly_activated, target_tokens, 0)
+            x = unpack_tokens_to_image(current_tokens, self.patch_size, self.grid_h, self.grid_w, x.shape[2], x.shape[3])
+            self.current_stage = target_stage
+            log_info(self.config.verbose, f"Activated {newly_activated.numel()} new tokens; now {self.current_indices.numel()}/{self.total_tokens}")
+            return x
+
+        self.pending_target_stage = target_stage
+        self.pending_newly_activated = newly_activated
+        self.pending_target_tokens = target_tokens
+        self.pending_relax_remaining = steps
+        log_info(
+            self.config.verbose,
+            f"Activated {newly_activated.numel()} new tokens; relaxing over {steps} steps before committing stage {target_stage}",
+        )
+        return self._apply_pending_microflow(diffusion_model, x)

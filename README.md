@@ -170,8 +170,8 @@ The most important ones:
 
 1. **Paper vs official code: DMF**
    - The paper describes a finite-time hitting ODE.
-   - The released code implements a one-shot linear relaxation with weight `1 / microflow_relax_steps`.
-   - This repo follows the **official code**, because that is the released inference behavior.
+   - This repo applies progressive relaxation across `microflow_relax_steps` denoising calls, with per-call blend weight `1 / remaining_steps`.
+   - This makes the `microflow_relax_steps` control semantically active instead of only scaling a one-shot blend.
 
 2. **Paper vs ComfyUI sampling semantics**
    - The paper is written in a direct generative-ODE form.

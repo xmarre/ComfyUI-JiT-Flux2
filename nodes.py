@@ -135,8 +135,6 @@ class Flux2JiTSamplerImpl(comfy.samplers.Sampler):
                     summary += f", last_mode={runtime.wrapper_last_mode}"
                 if runtime.wrapper_last_fallback_reasons:
                     summary += f", last_fallback={runtime.wrapper_last_fallback_reasons}"
-                if runtime.wrapper_call_count == 0:
-                    summary += ", wrapper_bypass_detected=1"
                 log_info(config.verbose, summary)
             transformer_options.pop(JIT_RUNTIME_KEY, None)
 

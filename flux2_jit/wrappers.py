@@ -22,8 +22,10 @@ def flux2_jit_diffusion_model_wrapper(executor, x, timestep, context, y=None, gu
 
     if runtime is None or config is None:
         return executor(x, timestep, context, y, guidance, ref_latents, control, transformer_options, **kwargs)
-    if control is not None or not hasattr(diffusion_model, "forward_orig"):
+    if ref_latents is not None or control is not None or not hasattr(diffusion_model, "forward_orig"):
         reasons = []
+        if ref_latents is not None:
+            reasons.append("ref_latents")
         if control is not None:
             reasons.append("control")
         if not hasattr(diffusion_model, "forward_orig"):
@@ -64,12 +66,11 @@ def flux2_jit_diffusion_model_wrapper(executor, x, timestep, context, y=None, gu
 
     runtime.wrapper_call_count += 1
     runtime.wrapper_sparse_call_count += 1
-    runtime.wrapper_last_mode = "sparse_ref" if ref_latents is not None else "sparse"
+    runtime.wrapper_last_mode = "sparse"
     runtime.wrapper_last_fallback_reasons = None
 
     if config.verbose and not runtime.wrapper_sparse_logged:
-        mode = "sparse path with reference latents" if ref_latents is not None else "sparse path"
-        log_info(config.verbose, f"Wrapper using {mode} ({active_indices.numel()}/{runtime.total_tokens} active tokens)")
+        log_info(config.verbose, f"Wrapper using sparse path ({active_indices.numel()}/{runtime.total_tokens} active tokens)")
         runtime.wrapper_sparse_logged = True
 
     img_active = img_tokens[:, active_indices, :]

@@ -12,7 +12,7 @@ def is_flux2_model(model_patcher) -> bool:
     try:
         image_model = model_patcher.model.model_config.unet_config.get("image_model")
         return image_model == "flux2"
-    except Exception:
+    except (AttributeError, KeyError, TypeError):
         return False
 
 

@@ -67,7 +67,7 @@ class JiTRuntime:
         kernel_size = 3
         mean = F.avg_pool2d(v_2d, kernel_size, stride=1, padding=kernel_size // 2)
         var = F.avg_pool2d(v_2d.square(), kernel_size, stride=1, padding=kernel_size // 2) - mean.square()
-        return var.mean(dim=1).squeeze(0)
+        return var.mean(dim=1).mean(dim=0)
 
     def _adaptive_densify(self, target_count: int, importance_map: torch.Tensor) -> torch.Tensor:
         current_indices = self.current_indices

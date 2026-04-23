@@ -45,7 +45,7 @@ def calculate_blur_params(sparsity_ratio: float, blur_scale: float) -> tuple[int
         return 3, 1.0
     characteristic_distance = 1.0 / math.sqrt(sparsity_ratio)
     sigma = max(1.0, min(10.0, blur_scale * characteristic_distance))
-    kernel_size = 2 * int(math.ceil(3.0 * sigma)) + 1
+    kernel_size = 2 * math.ceil(3.0 * sigma) + 1
     return kernel_size, sigma
 
 

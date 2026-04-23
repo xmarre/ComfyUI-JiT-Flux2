@@ -38,7 +38,7 @@ class JiTConfig:
         raw = [int(total_steps * ratio) for ratio in self.stage_ratios]
         stage_steps = []
         prev = 0
-        for idx, value in enumerate(raw):
+        for _idx, value in enumerate(raw):
             bounded = max(prev + 1, min(total_steps, value))
             stage_steps.append(bounded)
             prev = bounded

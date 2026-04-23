@@ -1,38 +1,157 @@
-# ComfyUI-Flux2-JiT
+# ComfyUI-JiT-Flux2
 
-A practical ComfyUI custom-node implementation of **Just-in-Time (JiT)** for **Flux.2** sampling.
+An unofficial ComfyUI implementation of **Just-in-Time (JiT)** for **Flux.2**.
 
-This repo implements the paper idea as a **Flux.2-focused ComfyUI integration** rather than a line-for-line port of the authors' Diffusers pipelines. The design preserves the official release's inference-time structure where that structure is useful, but moves the stateful sampling logic into a ComfyUI custom sampler so latent-state transitions are applied to the real sampler state instead of only to isolated model calls.
+JiT is a **training-free spatial acceleration** method for diffusion transformers. Instead of evaluating the full latent token grid at every denoising step, it computes the model on a sparse subset of **anchor tokens** in earlier stages, interpolates the missing regions, and progressively activates more tokens as the sample develops.
 
-## Scope
+This repository adapts that idea to **current ComfyUI Flux.2 workflows**. It is a practical, reviewable **ComfyUI port**, not the authors’ original pipeline and not a line-for-line reproduction of the paper’s FLUX.1-dev setup.
 
-Primary target:
+---
+
+## Paper and credit
+
+This repository is based on:
+
+> **Wenhao Sun, Ji Li, and Zhaoqiang Liu**  
+> **Just-in-Time: Training-Free Spatial Acceleration for Diffusion Transformers**  
+> arXiv:2603.10744, 2026
+
+- **Paper:** [arXiv:2603.10744](https://arxiv.org/abs/2603.10744)
+- **Project page:** [JiT project page](https://wenhao-sun77.github.io/JiT/)
+
+If you use this repository, please also cite the paper.
+
+### BibTeX
+
+```bibtex
+@article{sun2026jit,
+  title   = {Just-in-Time: Training-Free Spatial Acceleration for Diffusion Transformers},
+  author  = {Sun, Wenhao and Li, Ji and Liu, Zhaoqiang},
+  journal = {arXiv preprint arXiv:2603.10744},
+  year    = {2026}
+}
+```
+
+---
+
+## What JiT does
+
+The paper’s central observation is that diffusion transformers do **not** need uniform spatial compute throughout the entire denoising trajectory. Global structure tends to emerge early, while fine details are refined later. JiT exploits that by using a **coarse-to-fine token schedule**:
+
+1. Start from a sparse subset of spatial tokens.
+2. Run the transformer only on those active tokens.
+3. Extrapolate a full latent update from the sparse result.
+4. Gradually activate more tokens in regions that appear most important.
+5. Transition newly activated tokens in a way that preserves both structure and the correct noise level.
+
+In paper terms, the main pieces are:
+
+- **SAG-ODE (Spatially Approximated Generative ODE)**  
+  Computes the velocity field on sparse anchor tokens and lifts it back to the full token space.
+
+- **ITA (Importance-Guided Token Activation)**  
+  Selects which inactive tokens to activate next by looking at local variation in the predicted velocity field.
+
+- **DMF (Deterministic Micro-Flow)**  
+  Handles stage transitions so newly activated tokens are injected with a structurally coherent and statistically consistent target state, rather than appearing abruptly.
+
+The paper appendix further describes the interpolation operators used for JiT as a combination of:
+
+- nearest-neighbor interpolation,
+- controlled Gaussian blur,
+- masked composition that preserves exact anchor values.
+
+---
+
+## What the paper reports
+
+The JiT paper evaluates the method on **FLUX.1-dev**, not Flux.2. Its reported findings are important context for this repo, but they should not be read as direct benchmark claims for this ComfyUI Flux.2 port.
+
+Paper-reported results include:
+
+- a **~4× tier** using **18 NFEs**
+- a **~7× tier** using **11 NFEs**
+- strong quantitative results relative to both low-NFE vanilla FLUX.1-dev and other acceleration baselines
+- blind user-study preference wins against all compared baselines
+- ablations showing that removing the spatial approximation, dynamic token activation, or DMF target hurts quality
+
+The paper’s reported 3-stage schedules are:
+
+- **~4×:** `35% -> 62% -> 100%` active tokens across **18 NFEs**
+- **~7×:** `32% -> 60% -> 100%` active tokens across **11 NFEs**
+
+This repository uses those results and design ideas as the conceptual reference point, while adapting the implementation to ComfyUI and Flux.2.
+
+---
+
+## What this repository implements
+
+### Primary target
+
 - **Flux.2** in current ComfyUI
 
-Current status:
-- **Implemented:** Flux.2 text-to-image / image-generation path without ControlNet, reference latents, or masked denoising.
-- **Not implemented yet:** Flux.1, ControlNet, Kontext/reference-latent paths, inpainting masks, multi-eval samplers such as Heun/DPM families.
+### Currently implemented
 
-## Why the implementation is split across a model patch and a sampler
+- Flux.2 text-to-image / image-generation path
+- JiT sparse-token model patching
+- JiT custom sampler path for stage scheduling and latent-state transitions
+- preset schedules corresponding to the paper’s approximate **~4×** and **~7×** tiers
 
-A pure diffusion-model wrapper is not enough for JiT in ComfyUI, because the paper and official code both modify the latent state during stage transitions. In ComfyUI, if that logic only lives inside a diffusion-model wrapper, the external sampler state is unchanged, which breaks the intended DMF transition semantics.
+### Not implemented yet
 
-This repo therefore uses two pieces:
+- Flux.1 support
+- ControlNet paths
+- reference-latent / Kontext-style paths
+- masked denoising / inpainting
+- samplers that require multiple model evaluations per step (for example some Heun / DPM-family paths)
 
-1. **Model patch (`Flux2 JiT Apply`)**
-   - Replaces dense Flux.2 diffusion-model forward passes with sparse-token forward passes plus interpolation.
-   - This corresponds to the **SAG-ODE / augmented lifter** part of JiT.
+---
 
-2. **Custom sampler (`Flux2 JiT Sampler`)**
-   - Owns the stage schedule, token activation, DMF transition, and Euler-style latent update loop.
-   - This is where the latent state is actually updated before each evaluation when a stage transition happens.
+## Important scope note
 
-That split is the lowest-risk way to stay faithful to JiT's control flow inside ComfyUI.
+This is an **independent ComfyUI adaptation** of JiT for **Flux.2**.
+
+It is **not**:
+
+- an official release by the paper authors
+- a claim of exact paper-level benchmark reproduction
+- a byte-for-byte port of the original FLUX.1-dev Diffusers pipeline
+
+Where the paper describes algorithmic intent, this repo tries to preserve that intent. Where ComfyUI and Flux.2 impose different integration constraints, this repo chooses the smallest practical adaptation that keeps the control flow coherent.
+
+---
+
+## Why this repo is split into a model patch and a sampler
+
+A pure diffusion-model wrapper is not sufficient for JiT inside ComfyUI.
+
+The reason is that JiT is not only about sparse forward passes. It also changes the **latent state** when stages transition and new tokens become active. If that logic lived only inside a model wrapper, ComfyUI’s outer sampler state would not actually see the intended transition.
+
+This repository therefore splits the implementation into two parts:
+
+### 1. `Flux2 JiT Apply`
+
+A model patch that replaces dense Flux.2 diffusion-model forward passes with JiT-style sparse-token forward passes plus interpolation.
+
+This covers the **sparse evaluation / lifted full-space update** part of the method.
+
+### 2. `Flux2 JiT Sampler`
+
+A custom sampler that owns:
+
+- the stage schedule
+- token activation
+- stage-transition handling
+- latent updates during sampling
+
+This is where JiT’s transition logic is applied to the **real sampler state**, which is the key requirement for a faithful ComfyUI integration.
+
+---
 
 ## Repository structure
 
 ```text
-ComfyUI-Flux2-JiT/
+ComfyUI-JiT-Flux2/
 ├── __init__.py
 ├── nodes.py
 ├── LICENSE
@@ -47,173 +166,199 @@ ComfyUI-Flux2-JiT/
     └── wrappers.py
 ```
 
+---
+
 ## Installation
 
-Clone or copy this repo into `ComfyUI/custom_nodes/`:
+Clone into `ComfyUI/custom_nodes/`:
 
 ```bash
-git clone https://github.com/xmarre/ComfyUI-JiT-Flux2.git ComfyUI/custom_nodes/ComfyUI-Flux2-JiT
+git clone https://github.com/xmarre/ComfyUI-JiT-Flux2.git ComfyUI/custom_nodes/ComfyUI-JiT-Flux2
 ```
 
-Restart ComfyUI.
+Restart ComfyUI after installation.
+
+---
 
 ## Recommended workflow
 
-Use ComfyUI's **custom sampling** path, not the standard `KSampler` path.
+Use ComfyUI’s **custom sampling** path, not the standard `KSampler` path.
 
-Recommended graph:
+### Recommended graph
 
 1. Load a **Flux.2** model.
 2. Apply **Flux2 JiT Apply** to the model.
-3. Build conditioning as usual.
-4. Use **Flux2Scheduler** from ComfyUI core for sigma generation.
-5. Use **Flux2 JiT Sampler** as the `SAMPLER` input to **SamplerCustom**.
-6. Use an empty Flux.2 latent and decode as usual.
+3. Build positive / negative conditioning as usual.
+4. Generate sigmas using **Flux2Scheduler** from ComfyUI core.
+5. Feed **Flux2 JiT Sampler** into **SamplerCustom**.
+6. Start from an empty Flux.2 latent and decode normally.
 
-### Recommended settings
+### Recommended presets
 
-For the official presets:
+| Preset | Flux2Scheduler steps | Intended tier | Stage sparsities |
+|---|---:|---|---|
+| `default_4x` | 18 | paper-like ~4× tier | `35% -> 62% -> 100%` |
+| `default_7x` | 11 | paper-like ~7× tier | `32% -> 60% -> 100%` |
 
-- **4x preset**
-  - `preset = default_4x`
-  - `Flux2Scheduler steps = 18`
+These are **reference presets**, not guaranteed benchmark-equivalent reproductions of the paper’s FLUX.1-dev numbers.
 
-- **7x preset**
-  - `preset = default_7x`
-  - `Flux2Scheduler steps = 11`
-
-These step counts are the closest match to the authors' released Flux.2 JiT code.
+---
 
 ## Nodes
 
-### Flux2 JiT Apply
+## `Flux2 JiT Apply`
 
-Patches a Flux.2 model with JiT sparse-token inference.
+Patches a Flux.2 model with JiT sparse-token inference behavior.
 
-Inputs:
-- `model`: Flux.2 model
-- `preset`: `default_4x`, `default_7x`, or `custom`
-- `expected_total_steps`: used for validation/documentation; runtime sigma count still wins
-- `stage_ratios`: comma-separated stage boundaries, default `0.4,0.65,1.0`
-- `sparsity_ratios`: comma-separated active-token ratios, default `0.35,0.62,1.0`
-- `use_checkerboard_init`
-- `use_adaptive`
-- `microflow_relax_steps`
-- `blur_scale`
-- `verbose`
+### Inputs
 
-Output:
+- `model`  
+  Flux.2 model
+
+- `preset`  
+  `default_4x`, `default_7x`, or `custom`
+
+- `expected_total_steps`  
+  Expected total denoising steps. Used for validation / documentation. Runtime sigma count still determines actual execution.
+
+- `stage_ratios`  
+  Comma-separated stage boundaries. Default: `0.4,0.65,1.0`
+
+- `sparsity_ratios`  
+  Comma-separated active-token ratios. Default: `0.35,0.62,1.0`
+
+- `use_checkerboard_init`  
+  Enable sparse-grid style initialization for the first stage
+
+- `use_adaptive`  
+  Enable importance-guided adaptive token activation
+
+- `microflow_relax_steps`  
+  Controls how stage-transition relaxation is spread across denoising calls
+
+- `blur_scale`  
+  Controls interpolation blur strength
+
+- `verbose`  
+  Enable runtime logging
+
+### Output
+
 - patched `MODEL`
 
-### Flux2 JiT Sampler
+---
+
+## `Flux2 JiT Sampler`
 
 Produces a `SAMPLER` object for use with ComfyUI `SamplerCustom`.
 
-Output:
+### Output
+
 - `SAMPLER`
 
-## Mapping from paper components and official-code components to this repo
+---
 
-### Paper components → repo modules
+## Method-to-code mapping
 
-- **Nested token-subset chain / projectors**
-  - `flux2_jit/runtime.py`
-  - `flux2_jit/utils.py`
+### Paper concepts -> repo modules
 
-- **SAG-ODE / augmented lifter**
-  - `flux2_jit/wrappers.py`
-  - `flux2_jit/interpolation.py`
+- **Nested token-subset chain / projectors**  
+  `flux2_jit/runtime.py`  
+  `flux2_jit/utils.py`
 
-- **Interpolation operators `I_k` and `Φ_k`**
-  - `flux2_jit/interpolation.py`
+- **SAG-ODE / augmented lifter**  
+  `flux2_jit/wrappers.py`  
+  `flux2_jit/interpolation.py`
 
-- **Importance-guided token activation (ITA)**
-  - `flux2_jit/runtime.py`
+- **Interpolation operators `I_k` and `Φ_k`**  
+  `flux2_jit/interpolation.py`
 
-- **Deterministic micro-flow (DMF)**
-  - `flux2_jit/runtime.py`
+- **Importance-guided token activation (ITA)**  
+  `flux2_jit/runtime.py`
 
-- **JiT sampling loop**
-  - `nodes.py` (`Flux2JiTSamplerImpl`)
+- **Deterministic micro-flow (DMF)**  
+  `flux2_jit/runtime.py`
 
-### Official released Flux.2 JiT code → repo modules
+- **JiT sampling loop**  
+  `nodes.py` (`Flux2JiTSamplerImpl`)
 
-- `pipeline_flux2_klein_JiT.py::set_params`
-  - `flux2_jit/config.py`
+---
 
-- `pipeline_flux2_klein_JiT.py::_create_sparse_grid`
-  - `flux2_jit/utils.py::create_sparse_grid`
+## Key implementation notes
 
-- `pipeline_flux2_klein_JiT.py::_irregular_interpolation`
-  - `flux2_jit/interpolation.py::irregular_interpolation`
+The most important adaptation choices are:
 
-- `pipeline_flux2_klein_JiT.py::_compute_importance_map`
-  - `flux2_jit/runtime.py::_compute_importance_map`
+### 1. Paper benchmark target vs this repo target
 
-- `pipeline_flux2_klein_JiT.py::_adaptive_densify`
-  - `flux2_jit/runtime.py::_adaptive_densify`
+The paper benchmarks **FLUX.1-dev**. This repo targets **Flux.2 in ComfyUI**.
 
-- `pipeline_flux2_klein_JiT.py::_microflow_bridge`
-  - `flux2_jit/runtime.py::_microflow_bridge`
+That means this repository should be understood as a **method port**, not as a claim that the exact paper benchmark setup has been reproduced.
 
-- `pipeline_flux2_klein_JiT.py::__call__`
-  - split between:
-    - `nodes.py::Flux2JiTSamplerImpl.sample`
-    - `flux2_jit/runtime.py`
-    - `flux2_jit/wrappers.py`
+### 2. ComfyUI integration differs from a monolithic pipeline
 
-## Explicit mismatches, ambiguities, and chosen resolutions
+The paper and reference-style implementations can own the whole sampling loop directly.
 
-Detailed notes are in `docs/IMPLEMENTATION_NOTES.md`.
+In ComfyUI, the cleanest faithful port is a **custom sampler plus a sparse model wrapper**, because JiT needs to modify both model evaluation behavior and latent-state transitions.
 
-The most important ones:
+### 3. Sampling semantics must match ComfyUI’s Flux.2 path
 
-1. **Paper vs official code: DMF**
-   - The paper describes a finite-time hitting ODE.
-   - This repo applies progressive relaxation across `microflow_relax_steps` denoising calls, with per-call blend weight `1 / remaining_steps`.
-   - This makes the `microflow_relax_steps` control semantically active instead of only scaling a one-shot blend.
+The paper is written in continuous ODE language, while ComfyUI Flux.2 operates through its own model/sampler interfaces. This repo therefore maps the JiT idea onto ComfyUI’s actual Flux.2 sampling semantics rather than trying to force the paper’s notation directly into an incompatible hook point.
 
-2. **Paper vs ComfyUI sampling semantics**
-   - The paper is written in a direct generative-ODE form.
-   - ComfyUI Flux.2 uses its own flow-model denoiser/sampler semantics.
-   - This repo resolves that by using the ComfyUI identity:
-     - `velocity = (x - denoised) / sigma`
-     - `x0_pred = x - sigma * velocity`
-   - This matches ComfyUI Flux.2 behavior and is closer to the released Flux.2 code than forcing the paper notation directly.
+### 4. Unsupported branches are not faked
 
-3. **Official Flux.2 diffusers pipeline vs ComfyUI integration point**
-   - The released code owns the whole sampling loop.
-   - In ComfyUI, the cleanest faithful port is a **custom sampler + sparse model wrapper**, not a single pipeline file.
+Some modes discussed in paper-adjacent or reference implementations are not implemented here yet. This repo prefers to stay explicit about unsupported paths rather than silently falling back to misleading approximations.
 
-4. **Scheduler mismatch**
-   - The released Flux.2 code uses Flux.2's native schedule.
-   - In ComfyUI, the closest equivalent is the built-in **Flux2Scheduler** node.
-   - This repo therefore expects that scheduler in the recommended workflow.
+See `docs/IMPLEMENTATION_NOTES.md` for more detail.
 
-5. **Unsupported conditioning modes**
-   - The released Flux.2 JiT code also has image-conditioned handling.
-   - This repo currently falls back to dense behavior or refuses unsupported cases instead of pretending those branches are implemented.
+---
 
 ## Assumptions
 
-- ComfyUI's current Flux.2 implementation retains:
-  - `diffusion_model.process_img(...)`
-  - `diffusion_model.forward_orig(...)`
-  - `diffusion_model.patch_size`
-- Flux.2 latent patching/layout stays compatible with the current ComfyUI master the repo was developed against.
-- The intended sampler path is **Euler-like one-eval-per-step custom sampling**, using `SamplerCustom` and `Flux2Scheduler`.
+This repository currently assumes ComfyUI’s Flux.2 implementation still exposes the model internals needed by the patch, including expected latent patch/layout behavior and the relevant diffusion-model call path.
+
+The intended execution path is:
+
+- **Flux.2**
+- **Flux2Scheduler**
+- **SamplerCustom**
+- **Euler-like one-eval-per-step custom sampling**
+
+---
 
 ## Limitations
 
-- Only **Flux.2** is implemented.
-- Only the **custom sampling path** is supported.
-- No ControlNet, no reference latents, no masked denoising.
-- Not validated for multi-evaluation samplers such as Heun/DPM++ variants.
-- Not intended to be stacked with unrelated `DIFFUSION_MODEL` wrappers that also replace Flux.2 forward behavior.
-- Batch behavior assumes a shared active-token set per sampled latent batch.
+- Flux.2 only
+- custom sampling path only
+- no ControlNet
+- no reference latents
+- no masked denoising / inpainting
+- not validated for multi-eval samplers such as Heun or DPM++ families
+- not intended to be stacked with unrelated wrappers that also replace Flux.2 diffusion-model forward behavior
+- batch behavior assumes a shared active-token set per latent batch
 
-## Unresolved uncertainties
+---
 
-- The paper's notation and ComfyUI Flux.2's sigma/denoised conventions are not written in the same parameterization. The chosen mapping is consistent with ComfyUI's model-sampling code and the authors' released Flux.2 implementation, but it is still an integration inference, not a direct statement from the paper.
-- The released code's DMF implementation is weaker than the paper's stated finite-time ODE. This repo intentionally preserves that released behavior.
-- The official code's initial sparse-grid construction does a random fill/drop step to meet the exact token budget. This repo preserves that behavior, which means the exact initial token set is not deterministic across runs unless the torch RNG state is controlled before graph execution.
+## Acknowledgments
+
+Full credit for the JiT method belongs to the paper authors:
+
+- **Wenhao Sun**
+- **Ji Li**
+- **Zhaoqiang Liu**
+
+This repository is an unofficial ComfyUI adaptation of their method for Flux.2 workflows.
+
+---
+
+## Citation
+
+If this repository is useful in your work, please cite the JiT paper:
+
+```bibtex
+@article{sun2026jit,
+  title   = {Just-in-Time: Training-Free Spatial Acceleration for Diffusion Transformers},
+  author  = {Sun, Wenhao and Li, Ji and Liu, Zhaoqiang},
+  journal = {arXiv preprint arXiv:2603.10744},
+  year    = {2026}
+}
+```

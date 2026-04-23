@@ -52,7 +52,7 @@ ComfyUI-Flux2-JiT/
 Clone or copy this repo into `ComfyUI/custom_nodes/`:
 
 ```bash
-git clone <this-repo> ComfyUI/custom_nodes/ComfyUI-Flux2-JiT
+git clone https://github.com/xmarre/ComfyUI-JiT-Flux2.git ComfyUI/custom_nodes/ComfyUI-Flux2-JiT
 ```
 
 Restart ComfyUI.

@@ -142,7 +142,9 @@ class JiTRuntime:
     def maybe_apply_stage_transition(self, diffusion_model, x: torch.Tensor, step_index: int, sigma: torch.Tensor) -> torch.Tensor:
         self.initialize(diffusion_model, x)
         if self.pending_relax_remaining > 0:
-            return self._apply_pending_microflow(diffusion_model, x)
+            x = self._apply_pending_microflow(diffusion_model, x)
+            if self.pending_relax_remaining > 0:
+                return x
         assert self.current_stage is not None
         target_stage = self.target_stage_for_step(step_index)
         if target_stage >= self.current_stage:

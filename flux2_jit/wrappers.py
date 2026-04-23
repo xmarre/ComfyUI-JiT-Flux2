@@ -23,12 +23,16 @@ def flux2_jit_diffusion_model_wrapper(executor, x, timestep, context, y=None, gu
     if runtime is None or config is None:
         return executor(x, timestep, context, y, guidance, ref_latents, control, transformer_options, **kwargs)
     if control is not None or not hasattr(diffusion_model, "forward_orig"):
-        if runtime is not None and config.verbose and not runtime.wrapper_fallback_logged:
-            reasons = []
-            if control is not None:
-                reasons.append("control")
-            if not hasattr(diffusion_model, "forward_orig"):
-                reasons.append("missing forward_orig")
+        reasons = []
+        if control is not None:
+            reasons.append("control")
+        if not hasattr(diffusion_model, "forward_orig"):
+            reasons.append("missing forward_orig")
+        runtime.wrapper_call_count += 1
+        runtime.wrapper_fallback_call_count += 1
+        runtime.wrapper_last_mode = "fallback"
+        runtime.wrapper_last_fallback_reasons = ", ".join(reasons)
+        if config.verbose and not runtime.wrapper_fallback_logged:
             log_info(config.verbose, f"Wrapper fell back to dense path ({', '.join(reasons)})")
             runtime.wrapper_fallback_logged = True
         return executor(x, timestep, context, y, guidance, ref_latents, control, transformer_options, **kwargs)
@@ -37,6 +41,10 @@ def flux2_jit_diffusion_model_wrapper(executor, x, timestep, context, y=None, gu
     if runtime.current_indices is None or runtime.total_tokens is None:
         return executor(x, timestep, context, y, guidance, ref_latents, control, transformer_options, **kwargs)
     if runtime.current_indices.numel() >= runtime.total_tokens:
+        runtime.wrapper_call_count += 1
+        runtime.wrapper_dense_call_count += 1
+        runtime.wrapper_last_mode = "dense"
+        runtime.wrapper_last_fallback_reasons = None
         if config.verbose and not runtime.wrapper_dense_logged:
             log_info(config.verbose, f"Wrapper using dense path ({runtime.total_tokens}/{runtime.total_tokens} active tokens)")
             runtime.wrapper_dense_logged = True
@@ -53,6 +61,11 @@ def flux2_jit_diffusion_model_wrapper(executor, x, timestep, context, y=None, gu
     if active_indices_digest is None:
         active_indices_digest = compute_indices_digest(active_indices)
         runtime.current_indices_digest = active_indices_digest
+
+    runtime.wrapper_call_count += 1
+    runtime.wrapper_sparse_call_count += 1
+    runtime.wrapper_last_mode = "sparse_ref" if ref_latents is not None else "sparse"
+    runtime.wrapper_last_fallback_reasons = None
 
     if config.verbose and not runtime.wrapper_sparse_logged:
         mode = "sparse path with reference latents" if ref_latents is not None else "sparse path"

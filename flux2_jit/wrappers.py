@@ -104,6 +104,13 @@ def flux2_jit_diffusion_model_wrapper(executor, x, timestep, context, y=None, gu
                 w_offset=w_offset,
                 transformer_options=transformer_options,
             )
+            if ref_tokens.shape[0] != sparse_tokens.shape[0] or ref_ids.shape[0] != sparse_ids.shape[0]:
+                raise ValueError(
+                    "ref_latents batch mismatch before concat: "
+                    f"sparse_tokens={tuple(sparse_tokens.shape)}, ref_tokens={tuple(ref_tokens.shape)}, "
+                    f"sparse_ids={tuple(sparse_ids.shape)}, ref_ids={tuple(ref_ids.shape)}, "
+                    f"index={index}, h_offset={h_offset}, w_offset={w_offset}"
+                )
             sparse_tokens = torch.cat([sparse_tokens, ref_tokens], dim=1)
             sparse_ids = torch.cat([sparse_ids, ref_ids], dim=1)
             ref_num_tokens.append(ref_tokens.shape[1])

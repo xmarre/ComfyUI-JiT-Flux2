@@ -104,7 +104,17 @@ class Flux2JiTSamplerImpl(comfy.samplers.Sampler):
                 sigma = sigmas[i]
                 sigma_vec = sigma * s_in
                 x = runtime.maybe_apply_stage_transition(model_wrap.inner_model.diffusion_model, x, i, sigma_vec)
+                wrapper_calls_before = runtime.wrapper_call_count
                 denoised = model_wrap(x, sigma_vec, **extra_args)
+                if runtime.current_indices is not None and runtime.total_tokens is not None:
+                    sparse_tokens_expected = runtime.current_indices.numel() < runtime.total_tokens
+                    if sparse_tokens_expected and runtime.wrapper_call_count == wrapper_calls_before:
+                        raise RuntimeError(
+                            "Flux2JiTSampler stage logic is active, but the JiT diffusion-model wrapper did not execute "
+                            f"for step {i}. Sparse JiT is therefore not active, so no speedup is possible. "
+                            "Check that SamplerCustom receives the MODEL output from Flux2 JiT Apply and that no later "
+                            "node recloned, replaced, or bypassed the patched Flux.2 model wrapper."
+                        )
                 velocity = (x - denoised) / k_utils.append_dims(sigma_vec, x.ndim)
                 runtime.last_x_image = x.detach().clone()
                 runtime.last_velocity_image = velocity.detach().clone()
@@ -115,6 +125,16 @@ class Flux2JiTSamplerImpl(comfy.samplers.Sampler):
                 x = x + velocity * dt
             return model_wrap.inner_model.model_sampling.inverse_noise_scaling(sigmas[-1], x)
         finally:
+            if config.verbose:
+                summary = (
+                    f"Wrapper summary: calls={runtime.wrapper_call_count}, sparse={runtime.wrapper_sparse_call_count}, "
+                    f"dense={runtime.wrapper_dense_call_count}, fallback={runtime.wrapper_fallback_call_count}"
+                )
+                if runtime.wrapper_last_mode is not None:
+                    summary += f", last_mode={runtime.wrapper_last_mode}"
+                if runtime.wrapper_last_fallback_reasons:
+                    summary += f", last_fallback={runtime.wrapper_last_fallback_reasons}"
+                log_info(config.verbose, summary)
             transformer_options.pop(JIT_RUNTIME_KEY, None)
 
 

@@ -33,6 +33,12 @@ class JiTRuntime:
     pending_newly_activated: Optional[torch.Tensor] = None
     pending_target_tokens: Optional[torch.Tensor] = None
     pending_relax_remaining: int = 0
+    wrapper_call_count: int = 0
+    wrapper_sparse_call_count: int = 0
+    wrapper_dense_call_count: int = 0
+    wrapper_fallback_call_count: int = 0
+    wrapper_last_mode: Optional[str] = None
+    wrapper_last_fallback_reasons: Optional[str] = None
     wrapper_sparse_logged: bool = False
     wrapper_dense_logged: bool = False
     wrapper_fallback_logged: bool = False

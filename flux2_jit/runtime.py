@@ -32,6 +32,9 @@ class JiTRuntime:
     pending_newly_activated: Optional[torch.Tensor] = None
     pending_target_tokens: Optional[torch.Tensor] = None
     pending_relax_remaining: int = 0
+    wrapper_sparse_logged: bool = False
+    wrapper_dense_logged: bool = False
+    wrapper_fallback_logged: bool = False
 
     def initialize(self, diffusion_model, x: torch.Tensor) -> None:
         if self.current_stage is not None:

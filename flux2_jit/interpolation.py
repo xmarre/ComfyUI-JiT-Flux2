@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import math
 from dataclasses import dataclass, field
 from typing import Optional
@@ -21,7 +22,7 @@ class CoordCache:
     coords_full: Optional[torch.Tensor] = None
     height: Optional[int] = None
     width: Optional[int] = None
-    interpolation_plans: dict[tuple[int, int, int, int, int, str], InterpolationPlan] = field(default_factory=dict)
+    interpolation_plans: dict[tuple[bytes, int, int, int, int, str], InterpolationPlan] = field(default_factory=dict)
 
     def get(self, height: int, width: int, device: torch.device) -> torch.Tensor:
         if self.coords_full is None or self.height != height or self.width != width or self.coords_full.device != device:
@@ -44,12 +45,16 @@ class CoordCache:
         grid_w: int,
         blur_scale: float,
     ) -> InterpolationPlan:
+        indices_digest = hashlib.blake2b(
+            active_indices.detach().to(device="cpu", dtype=torch.int64).contiguous().numpy().tobytes(),
+            digest_size=16,
+        ).digest()
         key = (
-            id(active_indices),
+            indices_digest,
             total_tokens,
             grid_h,
             grid_w,
-            int(round(float(blur_scale) * 1_000_000.0)),
+            round(float(blur_scale) * 1_000_000.0),
             str(active_indices.device),
         )
         cached = self.interpolation_plans.get(key)

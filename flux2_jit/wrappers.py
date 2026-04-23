@@ -6,7 +6,7 @@ import torch
 
 from .interpolation import irregular_interpolation
 from .runtime import JiTRuntime
-from .utils import build_txt_ids, is_flux2_model, unpack_tokens_to_image
+from .utils import build_txt_ids, is_flux2_model, log_info, unpack_tokens_to_image
 
 
 JIT_CONFIG_KEY = "flux2_jit"

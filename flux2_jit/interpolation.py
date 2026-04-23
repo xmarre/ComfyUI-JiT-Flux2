@@ -40,17 +40,14 @@ class CoordCache:
     def get_interpolation_plan(
         self,
         active_indices: torch.Tensor,
+        active_indices_digest: bytes,
         total_tokens: int,
         grid_h: int,
         grid_w: int,
         blur_scale: float,
     ) -> InterpolationPlan:
-        indices_digest = hashlib.blake2b(
-            active_indices.detach().to(device="cpu", dtype=torch.int64).contiguous().numpy().tobytes(),
-            digest_size=16,
-        ).digest()
         key = (
-            indices_digest,
+            active_indices_digest,
             total_tokens,
             grid_h,
             grid_w,
@@ -107,9 +104,17 @@ def calculate_blur_params(sparsity_ratio: float, blur_scale: float) -> tuple[int
     return kernel_size, sigma
 
 
+def compute_indices_digest(active_indices: torch.Tensor) -> bytes:
+    return hashlib.blake2b(
+        active_indices.detach().to(device="cpu", dtype=torch.int64).contiguous().numpy().tobytes(),
+        digest_size=16,
+    ).digest()
+
+
 def irregular_interpolation(
     y_active: torch.Tensor,
     active_indices: torch.Tensor,
+    active_indices_digest: bytes,
     total_tokens: int,
     token_dim: int,
     grid_h: int,
@@ -120,7 +125,14 @@ def irregular_interpolation(
     if active_indices.numel() == 0:
         return torch.zeros(y_active.shape[0], total_tokens, token_dim, device=y_active.device, dtype=y_active.dtype)
 
-    plan = coord_cache.get_interpolation_plan(active_indices, total_tokens, grid_h, grid_w, blur_scale)
+    plan = coord_cache.get_interpolation_plan(
+        active_indices,
+        active_indices_digest,
+        total_tokens,
+        grid_h,
+        grid_w,
+        blur_scale,
+    )
 
     y_active_expanded = y_active.permute(1, 0, 2)
     gathered = y_active_expanded[plan.nearest_idx]

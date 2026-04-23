@@ -7,7 +7,7 @@ import torch
 import torch.nn.functional as F
 
 from .config import JiTConfig
-from .interpolation import CoordCache, irregular_interpolation
+from .interpolation import CoordCache, compute_indices_digest, irregular_interpolation
 from .utils import create_sparse_grid, log_info, unpack_tokens_to_image
 
 
@@ -19,6 +19,7 @@ class JiTRuntime:
     global_noise_image: torch.Tensor
     current_stage: Optional[int] = None
     current_indices: Optional[torch.Tensor] = None
+    current_indices_digest: Optional[bytes] = None
     last_x_image: Optional[torch.Tensor] = None
     last_velocity_image: Optional[torch.Tensor] = None
     last_sigma: Optional[torch.Tensor] = None
@@ -36,6 +37,10 @@ class JiTRuntime:
     wrapper_dense_logged: bool = False
     wrapper_fallback_logged: bool = False
 
+    def _set_current_indices(self, indices: torch.Tensor) -> None:
+        self.current_indices = indices
+        self.current_indices_digest = compute_indices_digest(indices)
+
     def initialize(self, diffusion_model, x: torch.Tensor) -> None:
         if self.current_stage is not None:
             return
@@ -51,13 +56,13 @@ class JiTRuntime:
         self.patch_size = patch_size
         self.current_stage = self.config.num_stages - 1
         initial_ratio = self.config.ratio_of_stage(self.current_stage)
-        self.current_indices = create_sparse_grid(
+        self._set_current_indices(create_sparse_grid(
             grid_h=h_len,
             grid_w=w_len,
             sparsity_ratio=initial_ratio,
             device=x.device,
             use_checkerboard=self.config.use_checkerboard_init,
-        )
+        ))
         log_info(self.config.verbose, f"Initialized stage {self.current_stage} with {self.current_indices.numel()}/{self.total_tokens} active tokens")
 
     def stage_steps(self) -> tuple[int, ...]:
@@ -176,15 +181,17 @@ class JiTRuntime:
         new_mask = ~torch.isin(new_indices, self.current_indices)
         newly_activated = new_indices[new_mask]
         if newly_activated.numel() == 0:
-            self.current_indices = new_indices
+            self._set_current_indices(new_indices)
             self.current_stage = target_stage
             return x
 
         last_x0_image = self.last_x_image - self.last_velocity_image * self.last_sigma.view(-1, 1, 1, 1)
         x0_tokens, _ = diffusion_model.process_img(last_x0_image)
+        assert self.current_indices_digest is not None
         x0_interpolated = irregular_interpolation(
             x0_tokens[:, self.current_indices, :],
             self.current_indices,
+            self.current_indices_digest,
             self.total_tokens,
             self.token_dim,
             self.grid_h,
@@ -198,7 +205,7 @@ class JiTRuntime:
 
         current_tokens, _ = diffusion_model.process_img(x)
         steps = int(self.config.microflow_relax_steps)
-        self.current_indices = new_indices
+        self._set_current_indices(new_indices)
         if steps <= 0:
             current_tokens = self._microflow_bridge(current_tokens, newly_activated, target_tokens, 0)
             x = unpack_tokens_to_image(current_tokens, self.patch_size, self.grid_h, self.grid_w, x.shape[2], x.shape[3])

@@ -4,7 +4,7 @@ from typing import Any, Dict
 
 import torch
 
-from .interpolation import irregular_interpolation
+from .interpolation import compute_indices_digest, irregular_interpolation
 from .runtime import JiTRuntime
 from .utils import build_txt_ids, is_flux2_model, log_info, unpack_tokens_to_image
 
@@ -51,6 +51,10 @@ def flux2_jit_diffusion_model_wrapper(executor, x, timestep, context, y=None, gu
 
     img_tokens, img_ids = diffusion_model.process_img(x, transformer_options=transformer_options)
     active_indices = runtime.current_indices.to(img_tokens.device)
+    active_indices_digest = runtime.current_indices_digest
+    if active_indices_digest is None:
+        active_indices_digest = compute_indices_digest(active_indices)
+        runtime.current_indices_digest = active_indices_digest
     if config.verbose and not runtime.wrapper_sparse_logged:
         log_info(config.verbose, f"Wrapper using sparse path ({active_indices.numel()}/{runtime.total_tokens} active tokens)")
         runtime.wrapper_sparse_logged = True
@@ -74,6 +78,7 @@ def flux2_jit_diffusion_model_wrapper(executor, x, timestep, context, y=None, gu
     full_output_tokens = irregular_interpolation(
         sparse_output_tokens,
         active_indices,
+        active_indices_digest,
         runtime.total_tokens,
         runtime.token_dim,
         runtime.grid_h,

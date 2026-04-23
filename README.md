@@ -101,7 +101,6 @@ This repository uses those results and design ideas as the conceptual reference 
 
 - Flux.1 support
 - ControlNet paths
-- reference-latent / Kontext-style paths
 - masked denoising / inpainting
 - samplers that require multiple model evaluations per step (for example some Heun / DPM-family paths)
 
@@ -330,7 +329,6 @@ The intended execution path is:
 - Flux.2 only
 - custom sampling path only
 - no ControlNet
-- no reference latents
 - no masked denoising / inpainting
 - not validated for multi-eval samplers such as Heun or DPM++ families
 - not intended to be stacked with unrelated wrappers that also replace Flux.2 diffusion-model forward behavior

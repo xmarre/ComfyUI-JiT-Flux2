@@ -115,13 +115,14 @@ class JiTRuntime:
             new_indices = self._adaptive_densify(target_count, importance_map)
             log_info(self.config.verbose, f"Step {step_index}: adaptive transition {self.current_stage}->{target_stage}")
         else:
-            new_indices = create_sparse_grid(
+            staged_indices = create_sparse_grid(
                 grid_h=self.grid_h,
                 grid_w=self.grid_w,
                 sparsity_ratio=self.config.ratio_of_stage(target_stage),
                 device=x.device,
                 use_checkerboard=self.config.use_checkerboard_init,
             )
+            new_indices = torch.cat([self.current_indices, staged_indices]).unique(sorted=True)
             log_info(self.config.verbose, f"Step {step_index}: fixed-grid transition {self.current_stage}->{target_stage}")
 
         new_mask = ~torch.isin(new_indices, self.current_indices)

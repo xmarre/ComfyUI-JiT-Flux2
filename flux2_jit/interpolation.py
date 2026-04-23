@@ -74,6 +74,8 @@ def irregular_interpolation(
     y_full_2d_nearest = y_full_nearest.reshape(y_active.shape[0], grid_h, grid_w, token_dim).permute(0, 3, 1, 2)
     sparsity_ratio = float(active_indices.numel()) / float(total_tokens)
     kernel_size, sigma = calculate_blur_params(sparsity_ratio, blur_scale)
+    max_kernel = 2 * max(0, min(grid_h, grid_w) - 1) + 1
+    kernel_size = min(kernel_size, max_kernel)
     y_full_2d_blur = gaussian_blur_2d(y_full_2d_nearest, kernel_size=kernel_size, sigma=sigma)
 
     active_mask = torch.zeros(total_tokens, device=y_active.device, dtype=y_active.dtype)

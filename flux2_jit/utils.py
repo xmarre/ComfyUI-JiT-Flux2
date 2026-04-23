@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import sys
 from typing import Tuple
 
 import numpy as np
@@ -88,4 +89,4 @@ def sigma_to_velocity(x: torch.Tensor, denoised: torch.Tensor, sigma: torch.Tens
 
 def log_info(verbose: bool, message: str) -> None:
     if verbose:
-        print(f"[Flux2-JiT] {message}")
+        print(f"[Flux2-JiT] {message}", file=sys.stderr, flush=True)

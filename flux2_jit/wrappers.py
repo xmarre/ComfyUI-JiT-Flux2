@@ -108,7 +108,7 @@ def flux2_jit_diffusion_model_wrapper(executor, x, timestep, context, y=None, gu
             sparse_ids = torch.cat([sparse_ids, ref_ids], dim=1)
             ref_num_tokens.append(ref_tokens.shape[1])
 
-        if timestep_zero and index > 0:
+        if timestep_zero and ref_num_tokens:
             sparse_timestep = torch.cat([timestep, timestep * 0], dim=0)
             timestep_zero_index = [[img_active.shape[1], sparse_ids.shape[1]]]
 

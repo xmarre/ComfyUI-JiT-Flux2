@@ -16,6 +16,45 @@ from .flux2_jit.utils import is_flux2_model, log_info
 from .flux2_jit.wrappers import JIT_CONFIG_KEY, JIT_RUNTIME_KEY, flux2_jit_diffusion_model_wrapper
 
 
+def _has_exact_wrapper(wrapper_list, wrapper):
+    return any(w is wrapper for w in wrapper_list)
+
+
+def _ensure_jit_wrapper_registered(model_patcher, model_options, verbose):
+    repaired = []
+
+    model_wrapper_list = model_patcher.get_wrappers(comfy.patcher_extension.WrappersMP.DIFFUSION_MODEL, "flux2_jit")
+    if not _has_exact_wrapper(model_wrapper_list, flux2_jit_diffusion_model_wrapper):
+        model_patcher.add_wrapper_with_key(
+            comfy.patcher_extension.WrappersMP.DIFFUSION_MODEL,
+            "flux2_jit",
+            flux2_jit_diffusion_model_wrapper,
+        )
+        repaired.append("model_patcher")
+
+    option_wrapper_list = comfy.patcher_extension.get_wrappers_with_key(
+        comfy.patcher_extension.WrappersMP.DIFFUSION_MODEL,
+        "flux2_jit",
+        model_options,
+        is_model_options=True,
+    )
+    if not _has_exact_wrapper(option_wrapper_list, flux2_jit_diffusion_model_wrapper):
+        comfy.patcher_extension.add_wrapper_with_key(
+            comfy.patcher_extension.WrappersMP.DIFFUSION_MODEL,
+            "flux2_jit",
+            flux2_jit_diffusion_model_wrapper,
+            model_options,
+            is_model_options=True,
+        )
+        repaired.append("model_options")
+
+    if repaired:
+        log_info(
+            verbose,
+            "Reattached JiT diffusion wrapper in " + ", ".join(repaired) + "; downstream model node likely dropped wrapper state",
+        )
+
+
 class Flux2JiTApply:
     @classmethod
     def INPUT_TYPES(cls):
@@ -68,7 +107,7 @@ class Flux2JiTApply:
 
         patched = model.clone()
         patched.model_options.setdefault("transformer_options", {})[JIT_CONFIG_KEY] = config
-        patched.add_wrapper_with_key(comfy.patcher_extension.WrappersMP.DIFFUSION_MODEL, "flux2_jit", flux2_jit_diffusion_model_wrapper)
+        _ensure_jit_wrapper_registered(patched, patched.model_options, verbose)
         return (patched,)
 
 
@@ -84,6 +123,8 @@ class Flux2JiTSamplerImpl(comfy.samplers.Sampler):
             raise ValueError("Flux2JiTSampler requires a model patched by Flux2JiTApply")
         if not is_flux2_model(model_wrap.model_patcher):
             raise ValueError("Flux2JiTSampler currently supports ComfyUI Flux.2 models only")
+
+        _ensure_jit_wrapper_registered(model_wrap.model_patcher, model_options, config.verbose)
 
         if config.expected_total_steps != (len(sigmas) - 1):
             log_info(config.verbose, f"Configured steps={config.expected_total_steps}, runtime sigmas={len(sigmas) - 1}; using runtime sigmas")

@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Sequence, Tuple
+from typing import Tuple
 
 
 DEFAULT_4X_STEPS = 18
 DEFAULT_7X_STEPS = 11
 DEFAULT_STAGE_RATIOS = (0.4, 0.65, 1.0)
-DEFAULT_4X_SPARSITY = (0.35, 0.62, 1.0)
-DEFAULT_7X_SPARSITY = (0.32, 0.60, 1.0)
+DEFAULT_4X_SPARSITY = (0.45, 0.70, 1.0)
+DEFAULT_7X_SPARSITY = (0.40, 0.66, 1.0)
 
 
 @dataclass(frozen=True)

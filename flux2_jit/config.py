@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Sequence, Tuple
+from typing import Tuple
 
 
 DEFAULT_4X_STEPS = 18
 DEFAULT_7X_STEPS = 11
 DEFAULT_STAGE_RATIOS = (0.4, 0.65, 1.0)
-DEFAULT_4X_SPARSITY = (0.35, 0.62, 1.0)
-DEFAULT_7X_SPARSITY = (0.32, 0.60, 1.0)
+DEFAULT_4X_SPARSITY = (0.45, 0.70, 1.0)
+DEFAULT_7X_SPARSITY = (0.40, 0.66, 1.0)
+DEFAULT_USE_CHECKERBOARD_INIT = True
 
 
 @dataclass(frozen=True)
@@ -16,7 +17,7 @@ class JiTConfig:
     expected_total_steps: int
     stage_ratios: Tuple[float, ...]
     sparsity_ratios: Tuple[float, ...]
-    use_checkerboard_init: bool = False
+    use_checkerboard_init: bool = DEFAULT_USE_CHECKERBOARD_INIT
     use_adaptive: bool = True
     microflow_relax_steps: int = 3
     blur_scale: float = 0.4
@@ -38,7 +39,7 @@ class JiTConfig:
         raw = [int(total_steps * ratio) for ratio in self.stage_ratios]
         stage_steps = []
         prev = 0
-        for _idx, value in enumerate(raw):
+        for value in raw:
             bounded = max(prev + 1, min(total_steps, value))
             stage_steps.append(bounded)
             prev = bounded
@@ -74,9 +75,7 @@ def config_from_inputs(
         sparsity_ratios = _parse_csv_floats(sparsity_ratios_csv)
 
     if len(stage_ratios) != len(sparsity_ratios):
-        raise ValueError(
-            f"stage_ratios and sparsity_ratios must have the same length; got {len(stage_ratios)} and {len(sparsity_ratios)}"
-        )
+        raise ValueError(f"stage_ratios and sparsity_ratios must have the same length; got {len(stage_ratios)} and {len(sparsity_ratios)}")
     if len(stage_ratios) < 2:
         raise ValueError("At least two JiT stages are required")
     if any(r <= 0.0 or r > 1.0 for r in sparsity_ratios):

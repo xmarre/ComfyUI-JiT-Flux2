@@ -14,12 +14,6 @@ def is_flux2_model(model_patcher) -> bool:
         return False
 
 
-def _boundary_mask_for_indices(indices: torch.Tensor, grid_h: int, grid_w: int) -> torch.Tensor:
-    y = torch.div(indices, grid_w, rounding_mode="floor")
-    x = indices.remainder(grid_w)
-    return (y == 0) | (y == grid_h - 1) | (x == 0) | (x == grid_w - 1)
-
-
 def _deterministic_hash_order(indices: torch.Tensor, grid_w: int) -> torch.Tensor:
     indices64 = indices.to(dtype=torch.int64)
     y = torch.div(indices64, grid_w, rounding_mode="floor")
@@ -31,36 +25,51 @@ def _deterministic_hash_order(indices: torch.Tensor, grid_w: int) -> torch.Tenso
     return torch.argsort(key)
 
 
-def _adjust_sparse_indices(indices: torch.Tensor, target_count: int, grid_h: int, grid_w: int, device: torch.device) -> torch.Tensor:
-    total_tokens = grid_h * grid_w
-    indices = indices.unique(sorted=True).long()
-    if indices.numel() == target_count:
+def _take_deterministic(indices: torch.Tensor, count: int, grid_w: int) -> torch.Tensor:
+    if count <= 0 or indices.numel() == 0:
+        return indices[:0]
+    if count >= indices.numel():
         return indices
+    return indices[_deterministic_hash_order(indices, grid_w)[:count]]
 
-    all_indices = torch.arange(total_tokens, device=device, dtype=torch.long)
 
+def _fill_sparse_budget(
+    boundary_indices: torch.Tensor,
+    phase_indices: list[torch.Tensor],
+    target_count: int,
+    total_tokens: int,
+    grid_w: int,
+    device: torch.device,
+) -> torch.Tensor:
+    if boundary_indices.numel() >= target_count:
+        return _take_deterministic(boundary_indices, target_count, grid_w).sort().values.long()
+
+    kept = [boundary_indices]
+    kept_count = int(boundary_indices.numel())
+
+    for phase in phase_indices:
+        if phase.numel() == 0:
+            continue
+        remaining = target_count - kept_count
+        if remaining <= 0:
+            break
+        selected_phase = _take_deterministic(phase, remaining, grid_w)
+        kept.append(selected_phase)
+        kept_count += int(selected_phase.numel())
+        if kept_count >= target_count:
+            break
+
+    indices = torch.cat(kept).unique(sorted=True).long()
     if indices.numel() < target_count:
         selected = torch.zeros(total_tokens, dtype=torch.bool, device=device)
         selected[indices] = True
-        available = all_indices[~selected]
-        count = min(target_count - indices.numel(), available.numel())
-        if count > 0:
-            supplement = available[_deterministic_hash_order(available, grid_w)[:count]]
-            indices = torch.cat([indices, supplement])
-        return indices.unique(sorted=True).long()
+        available = torch.arange(total_tokens, device=device, dtype=torch.long)[~selected]
+        supplement = _take_deterministic(available, target_count - int(indices.numel()), grid_w)
+        indices = torch.cat([indices, supplement]).unique(sorted=True).long()
 
-    boundary_mask = _boundary_mask_for_indices(indices, grid_h, grid_w)
-    boundary = indices[boundary_mask]
-    interior = indices[~boundary_mask]
-
-    if boundary.numel() >= target_count:
-        keep = boundary[_deterministic_hash_order(boundary, grid_w)[:target_count]]
-    else:
-        interior_count = target_count - boundary.numel()
-        keep_interior = interior[_deterministic_hash_order(interior, grid_w)[:interior_count]]
-        keep = torch.cat([boundary, keep_interior])
-
-    return keep.sort().values.long()
+    if indices.numel() > target_count:
+        indices = _take_deterministic(indices, target_count, grid_w)
+    return indices.sort().values.long()
 
 
 def create_sparse_grid(
@@ -79,25 +88,37 @@ def create_sparse_grid(
     x_coords = torch.arange(grid_w, device=device)
     yy, xx = torch.meshgrid(y_coords, x_coords, indexing="ij")
     all_indices = torch.arange(total_tokens, device=device, dtype=torch.long)
-    boundary = ((yy == 0) | (yy == grid_h - 1) | (xx == 0) | (xx == grid_w - 1)).reshape(-1)
+    boundary_mask = ((yy == 0) | (yy == grid_h - 1) | (xx == 0) | (xx == grid_w - 1)).reshape(-1)
+    boundary_indices = all_indices[boundary_mask]
 
     if use_checkerboard:
-        core = ((yy % 2 == 0) & (xx % 2 == 0)).reshape(-1)
-        indices = all_indices[core | boundary]
-        return _adjust_sparse_indices(indices, target_count, grid_h, grid_w, device)
+        core_mask = ((yy % 2 == 0) & (xx % 2 == 0)).reshape(-1) & ~boundary_mask
+        return _fill_sparse_budget(
+            boundary_indices=boundary_indices,
+            phase_indices=[all_indices[core_mask]],
+            target_count=target_count,
+            total_tokens=total_tokens,
+            grid_w=grid_w,
+            device=device,
+        )
 
     stride = max(1, int(math.ceil(math.sqrt(1.0 / max(float(sparsity_ratio), 1e-12)))))
-    selected = boundary.clone()
-
     offsets = [(oy, ox) for oy in range(stride) for ox in range(stride)]
     offsets.sort(key=lambda item: (item[0] * item[0] + item[1] * item[1], item[0] + item[1], item[0], item[1]))
 
+    phases = []
     for offset_y, offset_x in offsets:
-        selected |= ((yy % stride == offset_y) & (xx % stride == offset_x)).reshape(-1)
-        if int(selected.sum().item()) >= target_count:
-            break
+        phase_mask = ((yy % stride == offset_y) & (xx % stride == offset_x)).reshape(-1) & ~boundary_mask
+        phases.append(all_indices[phase_mask])
 
-    return _adjust_sparse_indices(all_indices[selected], target_count, grid_h, grid_w, device)
+    return _fill_sparse_budget(
+        boundary_indices=boundary_indices,
+        phase_indices=phases,
+        target_count=target_count,
+        total_tokens=total_tokens,
+        grid_w=grid_w,
+        device=device,
+    )
 
 
 def build_txt_ids(diffusion_model, batch_size: int, context_len: int, device: torch.device) -> torch.Tensor:

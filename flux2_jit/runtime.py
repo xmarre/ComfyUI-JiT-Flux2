@@ -206,24 +206,16 @@ class JiTRuntime:
         target_tokens = x0_interpolated[:, newly_activated, :] * (1.0 - sigma_scalar) + noise_tokens[:, newly_activated, :] * sigma_scalar
 
         current_tokens, _ = diffusion_model.process_img(x)
-        steps = int(self.config.microflow_relax_steps)
 
         # The sparse wrapper consumes every token in current_indices on the very
         # next model call. Therefore newly activated anchors must reach their
-        # DMF target before current_indices is expanded. Spreading this bridge
-        # across real denoising steps feeds partially relaxed, wrong-noise-level
-        # anchors into the transformer and leaves the DMF target stale as sigma
-        # advances.
-        if steps <= 0:
-            current_tokens = self._microflow_bridge(current_tokens, newly_activated, target_tokens, 0)
-        else:
-            for steps_remaining in range(steps, 0, -1):
-                current_tokens = self._microflow_bridge(
-                    current_tokens,
-                    newly_activated,
-                    target_tokens,
-                    steps_remaining,
-                )
+        # exact DMF target before current_indices is expanded.
+        current_tokens = self._microflow_bridge(
+            current_tokens,
+            newly_activated,
+            target_tokens,
+            0,
+        )
 
         x = unpack_tokens_to_image(current_tokens, self.patch_size, self.grid_h, self.grid_w, x.shape[2], x.shape[3])
         self._set_current_indices(new_indices)

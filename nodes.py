@@ -27,7 +27,7 @@ class Flux2JiTApply:
                 "expected_total_steps": ("INT", {"default": DEFAULT_4X_STEPS, "min": 1, "max": 10000}),
                 "stage_ratios": ("STRING", {"default": "0.4,0.65,1.0", "multiline": False}),
                 "sparsity_ratios": ("STRING", {"default": ",".join(str(x) for x in DEFAULT_4X_SPARSITY), "multiline": False}),
-                "use_checkerboard_init": ("BOOLEAN", {"default": False}),
+                "use_checkerboard_init": ("BOOLEAN", {"default": True}),
                 "use_adaptive": ("BOOLEAN", {"default": True}),
                 "microflow_relax_steps": ("INT", {"default": 3, "min": 0, "max": 64}),
                 "blur_scale": ("FLOAT", {"default": 0.4, "min": 0.05, "max": 4.0, "step": 0.01}),

@@ -74,7 +74,7 @@ Use ComfyUI's **custom sampling** path.
 5. Feed **Flux2 JiT Sampler** into **SamplerCustom**.
 6. Start from an empty Flux.2 latent and decode normally.
 
-The new scheduler is based on ComfyUI core Flux2Scheduler: it takes `steps`, `width`, and `height`, computes the Flux.2 empirical sequence-length shift from the image dimensions, and returns `SIGMAS` for SamplerCustom.
+The new scheduler is based on ComfyUI core Flux2Scheduler: it takes `steps`, image-space `width`, and image-space `height`, computes the Flux.2 empirical sequence-length shift from the image dimensions, and returns `SIGMAS` for SamplerCustom.
 
 ---
 
@@ -117,13 +117,11 @@ Produces `SIGMAS` for `SamplerCustom`.
 Inputs:
 
 - `steps`: number of denoising steps. Start with `18` for `default_4x` and `11` for `default_7x`.
-- `width`, `height`: final image dimensions. Keep these matched to the Flux.2 latent dimensions used in the workflow.
+- `width`, `height`: final image-space dimensions passed to Flux.2. Do not pass latent-token sizes. Non-16-aligned values are quantized internally to the latent token grid before computing the Flux.2 empirical sequence-length shift.
 - `schedule`: `flux2` or `jit_beta`.
   - `flux2` keeps the Flux2Scheduler-style shifted linear schedule and is the default.
   - `jit_beta` applies a JiT paper-style beta warp before the Flux.2 empirical shift. Treat it as experimental until visually validated on Flux.2.
 - `beta_alpha`, `beta_beta`, `beta_resolution`: parameters for `jit_beta` mode. Defaults are based on the paper's reported beta schedule.
-
-Non-16-aligned `width`/`height` values are quantized to the latent token grid before computing the Flux.2 empirical sequence-length shift.
 
 ### `Flux2 JiT Sampler`
 

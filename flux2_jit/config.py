@@ -16,7 +16,7 @@ class JiTConfig:
     expected_total_steps: int
     stage_ratios: Tuple[float, ...]
     sparsity_ratios: Tuple[float, ...]
-    use_checkerboard_init: bool = True
+    use_checkerboard_init: bool = False
     use_adaptive: bool = True
     microflow_relax_steps: int = 3
     blur_scale: float = 0.4

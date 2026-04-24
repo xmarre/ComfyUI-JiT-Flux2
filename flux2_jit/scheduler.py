@@ -23,6 +23,12 @@ def compute_empirical_mu(image_seq_len: int, num_steps: int) -> float:
     return float(a * num_steps + b)
 
 
+def flux2_image_seq_len(width: int, height: int) -> int:
+    quant_w = max(1, (int(width) + 15) // 16)
+    quant_h = max(1, (int(height) + 15) // 16)
+    return quant_w * quant_h
+
+
 def _approx_beta_ppf(probabilities: torch.Tensor, alpha: float, beta: float, resolution: int) -> torch.Tensor:
     resolution = max(512, int(resolution))
     alpha = float(alpha)
@@ -67,7 +73,7 @@ def get_flux2_jit_sigmas(
     if width <= 0 or height <= 0:
         raise ValueError("width and height must be positive")
 
-    image_seq_len = round(width * height / (16 * 16))
+    image_seq_len = flux2_image_seq_len(width, height)
     mu = compute_empirical_mu(image_seq_len=image_seq_len, num_steps=steps)
     base = torch.linspace(1.0, 0.0, steps + 1, dtype=torch.float32)
 

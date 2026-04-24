@@ -10,7 +10,13 @@ import comfy.patcher_extension
 import comfy.samplers
 from comfy.k_diffusion import utils as k_utils
 
-from .flux2_jit.config import DEFAULT_4X_SPARSITY, DEFAULT_4X_STEPS, DEFAULT_7X_STEPS, config_from_inputs
+from .flux2_jit.config import (
+    DEFAULT_4X_SPARSITY,
+    DEFAULT_4X_STEPS,
+    DEFAULT_7X_STEPS,
+    DEFAULT_USE_CHECKERBOARD_INIT,
+    config_from_inputs,
+)
 from .flux2_jit.runtime import JiTRuntime
 from .flux2_jit.scheduler import get_flux2_jit_sigmas
 from .flux2_jit.utils import is_flux2_model, log_info
@@ -27,7 +33,7 @@ class Flux2JiTApply:
                 "expected_total_steps": ("INT", {"default": DEFAULT_4X_STEPS, "min": 1, "max": 10000}),
                 "stage_ratios": ("STRING", {"default": "0.4,0.65,1.0", "multiline": False}),
                 "sparsity_ratios": ("STRING", {"default": ",".join(str(x) for x in DEFAULT_4X_SPARSITY), "multiline": False}),
-                "use_checkerboard_init": ("BOOLEAN", {"default": True}),
+                "use_checkerboard_init": ("BOOLEAN", {"default": DEFAULT_USE_CHECKERBOARD_INIT}),
                 "use_adaptive": ("BOOLEAN", {"default": True}),
                 "microflow_relax_steps": ("INT", {"default": 3, "min": 0, "max": 64}),
                 "blur_scale": ("FLOAT", {"default": 0.4, "min": 0.05, "max": 4.0, "step": 0.01}),

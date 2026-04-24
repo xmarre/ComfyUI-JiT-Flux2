@@ -10,8 +10,9 @@ import comfy.patcher_extension
 import comfy.samplers
 from comfy.k_diffusion import utils as k_utils
 
-from .flux2_jit.config import DEFAULT_4X_STEPS, DEFAULT_7X_STEPS, config_from_inputs
+from .flux2_jit.config import DEFAULT_4X_SPARSITY, DEFAULT_4X_STEPS, DEFAULT_7X_STEPS, config_from_inputs
 from .flux2_jit.runtime import JiTRuntime
+from .flux2_jit.scheduler import get_flux2_jit_sigmas
 from .flux2_jit.utils import is_flux2_model, log_info
 from .flux2_jit.wrappers import JIT_CONFIG_KEY, JIT_RUNTIME_KEY, flux2_jit_diffusion_model_wrapper
 
@@ -25,7 +26,7 @@ class Flux2JiTApply:
                 "preset": (("default_4x", "default_7x", "custom"), {"default": "default_4x"}),
                 "expected_total_steps": ("INT", {"default": DEFAULT_4X_STEPS, "min": 1, "max": 10000}),
                 "stage_ratios": ("STRING", {"default": "0.4,0.65,1.0", "multiline": False}),
-                "sparsity_ratios": ("STRING", {"default": "0.35,0.62,1.0", "multiline": False}),
+                "sparsity_ratios": ("STRING", {"default": ",".join(str(x) for x in DEFAULT_4X_SPARSITY), "multiline": False}),
                 "use_checkerboard_init": ("BOOLEAN", {"default": False}),
                 "use_adaptive": ("BOOLEAN", {"default": True}),
                 "microflow_relax_steps": ("INT", {"default": 3, "min": 0, "max": 64}),
@@ -152,12 +153,46 @@ class Flux2JiTSampler:
         return (Flux2JiTSamplerImpl(),)
 
 
+class Flux2JiTScheduler:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "steps": ("INT", {"default": DEFAULT_4X_STEPS, "min": 1, "max": 4096}),
+                "width": ("INT", {"default": 1024, "min": 16, "max": 16384, "step": 1}),
+                "height": ("INT", {"default": 1024, "min": 16, "max": 16384, "step": 1}),
+                "schedule": (("flux2", "jit_beta"), {"default": "flux2"}),
+                "beta_alpha": ("FLOAT", {"default": 1.4, "min": 0.05, "max": 10.0, "step": 0.01}),
+                "beta_beta": ("FLOAT", {"default": 0.42, "min": 0.05, "max": 10.0, "step": 0.01}),
+                "beta_resolution": ("INT", {"default": 8192, "min": 512, "max": 65536}),
+            }
+        }
+
+    RETURN_TYPES = ("SIGMAS",)
+    FUNCTION = "get_sigmas"
+    CATEGORY = "sampling/custom_sampling/flux2_jit"
+
+    def get_sigmas(self, steps, width, height, schedule, beta_alpha, beta_beta, beta_resolution):
+        sigmas = get_flux2_jit_sigmas(
+            steps=int(steps),
+            width=int(width),
+            height=int(height),
+            schedule=schedule,
+            beta_alpha=float(beta_alpha),
+            beta_beta=float(beta_beta),
+            beta_resolution=int(beta_resolution),
+        )
+        return (sigmas,)
+
+
 NODE_CLASS_MAPPINGS = {
     "Flux2JiTApply": Flux2JiTApply,
     "Flux2JiTSampler": Flux2JiTSampler,
+    "Flux2JiTScheduler": Flux2JiTScheduler,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "Flux2JiTApply": "Flux2 JiT Apply",
     "Flux2JiTSampler": "Flux2 JiT Sampler",
+    "Flux2JiTScheduler": "Flux2 JiT Scheduler",
 }

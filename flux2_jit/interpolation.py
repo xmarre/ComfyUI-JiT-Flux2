@@ -15,6 +15,7 @@ class InterpolationPlan:
     active_mask_2d: torch.Tensor
     kernel_size: int
     sigma: float
+    blur_mix: float
 
 
 @dataclass
@@ -64,7 +65,7 @@ class CoordCache:
         nearest_idx = dist.argmin(dim=-1)
 
         sparsity_ratio = float(active_indices.numel()) / float(total_tokens)
-        kernel_size, sigma = calculate_blur_params(sparsity_ratio, blur_scale)
+        kernel_size, sigma, blur_mix = calculate_blur_params(sparsity_ratio, blur_scale)
         max_kernel = 2 * max(0, min(grid_h, grid_w) - 1) + 1
         kernel_size = min(kernel_size, max_kernel)
 
@@ -77,6 +78,7 @@ class CoordCache:
             active_mask_2d=active_mask_2d,
             kernel_size=kernel_size,
             sigma=sigma,
+            blur_mix=blur_mix,
         )
         self.interpolation_plans[key] = plan
         return plan
@@ -95,13 +97,26 @@ def gaussian_blur_2d(img: torch.Tensor, kernel_size: int, sigma: float) -> torch
     return F.conv2d(img, kernel2d, groups=img.shape[1])
 
 
-def calculate_blur_params(sparsity_ratio: float, blur_scale: float) -> tuple[int, float]:
-    if sparsity_ratio <= 0.0 or sparsity_ratio >= 1.0:
-        return 3, 1.0
+def calculate_blur_params(sparsity_ratio: float, blur_scale: float) -> tuple[int, float, float]:
+    if sparsity_ratio <= 0.0 or sparsity_ratio >= 1.0 or blur_scale <= 0.0:
+        return 1, 0.0, 0.0
+
     characteristic_distance = 1.0 / math.sqrt(sparsity_ratio)
-    sigma = max(1.0, min(10.0, blur_scale * characteristic_distance))
+
+    # The JiT paper's blur operator is applied to the approximated velocity
+    # field. In ComfyUI's Flux wrapper this lifter is applied at the diffusion
+    # model boundary, so replacing inactive tokens with a fully blurred field is
+    # visibly over-smoothing on Flux.2. Keep blur as a low-pass correction to
+    # nearest-neighbor interpolation instead of making it the whole inactive
+    # value, and allow sub-pixel sigmas for dense 40-70% anchor stages.
+    sigma = max(0.0, min(10.0, blur_scale * characteristic_distance))
+    if sigma < 0.25:
+        return 1, 0.0, 0.0
+
     kernel_size = 2 * math.ceil(3.0 * sigma) + 1
-    return kernel_size, sigma
+    inactive_ratio = max(0.0, min(1.0, 1.0 - sparsity_ratio))
+    blur_mix = max(0.0, min(1.0, blur_scale * inactive_ratio))
+    return kernel_size, sigma, blur_mix
 
 
 def compute_indices_digest(active_indices: torch.Tensor) -> bytes:
@@ -143,5 +158,7 @@ def irregular_interpolation(
 
     active_mask_2d = plan.active_mask_2d.to(dtype=y_active.dtype)
     inactive_mask_2d = 1.0 - active_mask_2d
-    y_full_2d = y_full_2d_nearest * active_mask_2d + y_full_2d_blur * inactive_mask_2d
+    blur_mix = y_active.new_tensor(plan.blur_mix)
+    y_full_2d_inactive = y_full_2d_nearest + (y_full_2d_blur - y_full_2d_nearest) * blur_mix
+    y_full_2d = y_full_2d_nearest * active_mask_2d + y_full_2d_inactive * inactive_mask_2d
     return y_full_2d.permute(0, 2, 3, 1).reshape(y_active.shape[0], total_tokens, token_dim)

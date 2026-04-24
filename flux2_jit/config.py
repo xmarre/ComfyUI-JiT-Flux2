@@ -9,6 +9,7 @@ DEFAULT_7X_STEPS = 11
 DEFAULT_STAGE_RATIOS = (0.4, 0.65, 1.0)
 DEFAULT_4X_SPARSITY = (0.45, 0.70, 1.0)
 DEFAULT_7X_SPARSITY = (0.40, 0.66, 1.0)
+DEFAULT_USE_CHECKERBOARD_INIT = True
 
 
 @dataclass(frozen=True)
@@ -16,7 +17,7 @@ class JiTConfig:
     expected_total_steps: int
     stage_ratios: Tuple[float, ...]
     sparsity_ratios: Tuple[float, ...]
-    use_checkerboard_init: bool = True
+    use_checkerboard_init: bool = DEFAULT_USE_CHECKERBOARD_INIT
     use_adaptive: bool = True
     microflow_relax_steps: int = 3
     blur_scale: float = 0.4

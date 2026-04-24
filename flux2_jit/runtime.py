@@ -155,10 +155,6 @@ class JiTRuntime:
 
     def maybe_apply_stage_transition(self, diffusion_model, x: torch.Tensor, step_index: int, sigma: torch.Tensor) -> torch.Tensor:
         self.initialize(diffusion_model, x)
-        if self.pending_relax_remaining > 0:
-            x = self._apply_pending_microflow(diffusion_model, x)
-            if self.pending_relax_remaining > 0:
-                return x
         assert self.current_stage is not None
         target_stage = self.target_stage_for_step(step_index)
         if target_stage >= self.current_stage:
@@ -210,21 +206,23 @@ class JiTRuntime:
         target_tokens = x0_interpolated[:, newly_activated, :] * (1.0 - sigma_scalar) + noise_tokens[:, newly_activated, :] * sigma_scalar
 
         current_tokens, _ = diffusion_model.process_img(x)
-        steps = int(self.config.microflow_relax_steps)
-        self._set_current_indices(new_indices)
-        if steps <= 0:
-            current_tokens = self._microflow_bridge(current_tokens, newly_activated, target_tokens, 0)
-            x = unpack_tokens_to_image(current_tokens, self.patch_size, self.grid_h, self.grid_w, x.shape[2], x.shape[3])
-            self.current_stage = target_stage
-            log_info(self.config.verbose, f"Activated {newly_activated.numel()} new tokens; now {self.current_indices.numel()}/{self.total_tokens}")
-            return x
 
-        self.pending_target_stage = target_stage
-        self.pending_newly_activated = newly_activated
-        self.pending_target_tokens = target_tokens
-        self.pending_relax_remaining = steps
+        # The sparse wrapper consumes every token in current_indices on the very
+        # next model call. Therefore newly activated anchors must reach their
+        # exact DMF target before current_indices is expanded.
+        current_tokens = self._microflow_bridge(
+            current_tokens,
+            newly_activated,
+            target_tokens,
+            0,
+        )
+
+        x = unpack_tokens_to_image(current_tokens, self.patch_size, self.grid_h, self.grid_w, x.shape[2], x.shape[3])
+        self._set_current_indices(new_indices)
+        self.current_stage = target_stage
+        self._clear_pending_microflow()
         log_info(
             self.config.verbose,
-            f"Activated {newly_activated.numel()} new tokens; relaxing over {steps} steps before committing stage {target_stage}",
+            f"Activated {newly_activated.numel()} new tokens; stage committed to {target_stage}",
         )
-        return self._apply_pending_microflow(diffusion_model, x)
+        return x

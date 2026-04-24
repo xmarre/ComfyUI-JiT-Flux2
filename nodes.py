@@ -26,7 +26,7 @@ class Flux2JiTApply:
                 "expected_total_steps": ("INT", {"default": DEFAULT_4X_STEPS, "min": 1, "max": 10000}),
                 "stage_ratios": ("STRING", {"default": "0.4,0.65,1.0", "multiline": False}),
                 "sparsity_ratios": ("STRING", {"default": "0.35,0.62,1.0", "multiline": False}),
-                "use_checkerboard_init": ("BOOLEAN", {"default": True}),
+                "use_checkerboard_init": ("BOOLEAN", {"default": False}),
                 "use_adaptive": ("BOOLEAN", {"default": True}),
                 "microflow_relax_steps": ("INT", {"default": 3, "min": 0, "max": 64}),
                 "blur_scale": ("FLOAT", {"default": 0.4, "min": 0.05, "max": 4.0, "step": 0.01}),
@@ -94,7 +94,7 @@ class Flux2JiTSamplerImpl(comfy.samplers.Sampler):
             config=config,
             total_steps=len(sigmas) - 1,
             sigmas=sigmas,
-            global_noise_image=torch.randn_like(x),
+            global_noise_image=noise.detach().to(device=x.device, dtype=x.dtype).clone(),
         )
         transformer_options[JIT_RUNTIME_KEY] = runtime
 
